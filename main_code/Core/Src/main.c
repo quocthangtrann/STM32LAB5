@@ -19,7 +19,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
+#include <string.h>
+#include <stdio.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -45,7 +46,32 @@ ADC_HandleTypeDef hadc1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+/* UART RX single-byte temp (for HAL receive IRQ) */
+volatile uint8_t rx_temp = 0;
 
+/* Circular RX buffer (producer in IRQ, consumer in main) */
+volatile uint8_t rx_buffer[RX_BUFFER_SIZE];
+volatile uint16_t rx_head = 0;
+volatile uint16_t rx_tail = 0;
+volatile uint8_t rx_flag = 0; /* set by IRQ when new data arrived */
+
+/* Command parser */
+char cmd_buffer[CMD_BUFFER_SIZE];
+uint8_t cmd_len = 0;
+volatile uint8_t command_available = 0;
+
+/* ADC and packet storage */
+uint32_t last_adc_value = 0;
+char last_packet[PACKET_MAXLEN] = {0};
+
+/* UART communication FSM */
+typedef enum {
+  COMM_IDLE = 0,
+  COMM_SENT_WAIT_ACK,
+} comm_state_t;
+
+comm_state_t comm_state = COMM_IDLE;
+uint32_t comm_timestamp = 0; /* ms when last packet was sent */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -59,7 +85,9 @@ static void MX_USART2_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+/* Forward declarations of user functions */
+void command_parser_fsm(void);
+void uart_communication_fsm(void);
 /* USER CODE END 0 */
 
 /**
@@ -93,7 +121,15 @@ int main(void)
   MX_ADC1_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  /* Start ADC in continuous mode (configured in MX) */
+   if (HAL_ADC_Start(&hadc1) != HAL_OK) {
+     Error_Handler();
+   }
 
+   /* Start UART receive: 1 byte by interrupt */
+   if (HAL_UART_Receive_IT(&huart2, (uint8_t *)&rx_temp, 1) != HAL_OK) {
+     Error_Handler();
+   }
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -101,7 +137,18 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+	    /* blink LED to show main loop alive (pa5) */
+	    HAL_GPIO_TogglePin(LED_RED_GPIO_Port, LED_RED_Pin);
+	    HAL_Delay(500);
 
+	    /* If IRQ put bytes to rx_buffer, parse them */
+	    if (rx_flag) {
+	      rx_flag = 0;
+	      command_parser_fsm();
+	    }
+
+	    /* Run communication FSM: handle !RST# and ACK/timeouts */
+	    uart_communication_fsm();
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -111,6 +158,126 @@ int main(void)
   * @brief System Clock Configuration
   * @retval None
   */
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART2)
+  {
+    uint16_t next_head = rx_head + 1;
+    if (next_head >= RX_BUFFER_SIZE) next_head = 0;
+
+    /* push byte if buffer not full */
+    if (next_head != rx_tail) {
+      rx_buffer[rx_head] = rx_temp;
+      rx_head = next_head;
+      rx_flag = 1; /* notify main loop there's data to process */
+    } else {
+      /* buffer full: drop byte (could set overflow flag) */
+    }
+
+    /* re-enable next byte reception */
+    HAL_UART_Receive_IT(&huart2, (uint8_t *)&rx_temp, 1);
+  }
+}
+
+void command_parser_fsm(void)
+{
+  while (rx_tail != rx_head)
+  {
+    uint8_t b = rx_buffer[rx_tail];
+    rx_tail++;
+    if (rx_tail >= RX_BUFFER_SIZE) rx_tail = 0;
+
+    if (b == '!') {
+      /* start new command */
+      cmd_len = 0;
+      if (cmd_len < (CMD_BUFFER_SIZE - 1)) {
+        cmd_buffer[cmd_len++] = '!';
+      }
+    } else if (cmd_len > 0) {
+      /* we are inside a command */
+      if (cmd_len < (CMD_BUFFER_SIZE - 1)) {
+        cmd_buffer[cmd_len++] = (char)b;
+      } else {
+        /* overflow: reset parser */
+        cmd_len = 0;
+      }
+
+      if (b == '#') {
+        /* complete command */
+        cmd_buffer[cmd_len] = '\0';
+        command_available = 1;
+        /* reset cmd_len so next command starts fresh */
+        cmd_len = 0;
+        /* return to let main handle (optional: continue to parse more commands) */
+        /* continue parsing remaining bytes in buffer */
+      }
+    } else {
+      /* ignore bytes outside !...# frame */
+    }
+  }
+}
+
+/* Helper: send last_packet stored (non-blocking within reason) */
+static void transmit_last_packet(void)
+{
+  int len = (int)strlen(last_packet);
+  if (len > 0) {
+    HAL_UART_Transmit(&huart2, (uint8_t *)last_packet, len, 200);
+  }
+}
+
+/* Build and send packet from last_adc_value */
+static void send_adc_packet(void)
+{
+  /* format: !ADC=1234# (enough space: PACKET_MAXLEN >= 12) */
+  int len = snprintf(last_packet, PACKET_MAXLEN, "!ADC=%lu#", (unsigned long)last_adc_value);
+  if (len > 0 && len < PACKET_MAXLEN) {
+    HAL_UART_Transmit(&huart2, (uint8_t *)last_packet, len, 200);
+    comm_state = COMM_SENT_WAIT_ACK;
+    comm_timestamp = HAL_GetTick();
+  }
+}
+
+/* ------------------ UART Communication FSM ------------------
+   Handles commands:
+     - !RST# : read ADC and send !ADC=xxxx#, then wait for !OK#
+     - !OK#  : acknowledge receipt (stop waiting/resend)
+   If ACK not received within ACK_TIMEOUT_MS, resend the packet (store last_packet).
+*/
+void uart_communication_fsm(void)
+{
+  if (command_available) {
+    /* copy command to local buffer to avoid races */
+    char local_cmd[CMD_BUFFER_SIZE];
+    strncpy(local_cmd, cmd_buffer, CMD_BUFFER_SIZE);
+    local_cmd[CMD_BUFFER_SIZE - 1] = '\0';
+    command_available = 0;
+
+    if (strcmp(local_cmd, "!RST#") == 0) {
+      /* read latest ADC value (continuous conversion mode) */
+      /* Optionally check conversion ready with HAL_ADC_PollForConversion if desired */
+      last_adc_value = HAL_ADC_GetValue(&hadc1);
+      send_adc_packet();
+    } else if (strcmp(local_cmd, "!OK#") == 0) {
+      /* ACK received: clear state */
+      comm_state = COMM_IDLE;
+    } else {
+      /* Unknown command: optionally echo or ignore */
+    }
+  }
+
+  /* handle ACK timeout and resend */
+  if (comm_state == COMM_SENT_WAIT_ACK) {
+    uint32_t now = HAL_GetTick();
+    if ((now - comm_timestamp) >= ACK_TIMEOUT_MS) {
+      /* resend stored packet */
+      transmit_last_packet();
+      comm_timestamp = now; /* restart timer */
+    }
+  }
+}
+
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};

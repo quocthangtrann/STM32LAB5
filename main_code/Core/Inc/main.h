@@ -54,14 +54,18 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+void command_parser_fsm(void);
+void uart_communication_fsm(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
 #define LED_RED_Pin GPIO_PIN_5
 #define LED_RED_GPIO_Port GPIOA
 /* USER CODE BEGIN Private defines */
-
+#define RX_BUFFER_SIZE    64
+#define CMD_BUFFER_SIZE   32
+#define PACKET_MAXLEN     20
+#define ACK_TIMEOUT_MS    3000U
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
