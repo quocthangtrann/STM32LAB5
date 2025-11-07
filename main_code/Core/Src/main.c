@@ -85,6 +85,13 @@ static void MX_USART2_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+static void uart_send_crlf(void)
+{
+  const char crlf[] = "\r\n";
+  HAL_UART_Transmit(&huart2, (uint8_t*)crlf, 2, 50);
+}
+
 /* Forward declarations of user functions */
 void command_parser_fsm(void);
 void uart_communication_fsm(void);
@@ -224,6 +231,7 @@ static void transmit_last_packet(void)
   int len = (int)strlen(last_packet);
   if (len > 0) {
     HAL_UART_Transmit(&huart2, (uint8_t *)last_packet, len, 200);
+    uart_send_crlf();
   }
 }
 
@@ -234,6 +242,7 @@ static void send_adc_packet(void)
   int len = snprintf(last_packet, PACKET_MAXLEN, "!ADC=%lu#", (unsigned long)last_adc_value);
   if (len > 0 && len < PACKET_MAXLEN) {
     HAL_UART_Transmit(&huart2, (uint8_t *)last_packet, len, 200);
+    uart_send_crlf();
     comm_state = COMM_SENT_WAIT_ACK;
     comm_timestamp = HAL_GetTick();
   }
