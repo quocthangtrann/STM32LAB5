@@ -27,9 +27,9 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   ALLOC
  11 .ARM.attributes 00000029  00000000  00000000  00020074  2**0
                   CONTENTS, READONLY
- 12 .debug_info   0000a72f  00000000  00000000  0002009d  2**0
+ 12 .debug_info   0000a72b  00000000  00000000  0002009d  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 13 .debug_abbrev 00001b39  00000000  00000000  0002a7cc  2**0
+ 13 .debug_abbrev 00001b39  00000000  00000000  0002a7c8  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
  14 .debug_aranges 00000800  00000000  00000000  0002c308  2**3
                   CONTENTS, READONLY, DEBUGGING, OCTETS
@@ -164,7 +164,6 @@ int main(void)
   MX_USART2_UART_Init();
  80001b8:	f000 fa8c 	bl	80006d4 <MX_USART2_UART_Init>
   /* USER CODE BEGIN 2 */
-  /* Start ADC in continuous mode (configured in MX) */
    if (HAL_ADC_Start(&hadc1) != HAL_OK) {
  80001bc:	4813      	ldr	r0, [pc, #76]	; (800020c <main+0x68>)
  80001be:	f000 fd9d 	bl	8000cfc <HAL_ADC_Start>
@@ -175,7 +174,6 @@ int main(void)
  80001c8:	f000 fae0 	bl	800078c <Error_Handler>
    }
 
-   /* Start UART receive: 1 byte by interrupt */
    if (HAL_UART_Receive_IT(&huart2, (uint8_t *)&rx_temp, 1) != HAL_OK) {
  80001cc:	2201      	movs	r2, #1
  80001ce:	4910      	ldr	r1, [pc, #64]	; (8000210 <main+0x6c>)
@@ -199,7 +197,6 @@ int main(void)
  80001e8:	f44f 70fa 	mov.w	r0, #500	; 0x1f4
  80001ec:	f000 fc8a 	bl	8000b04 <HAL_Delay>
 
-	    /* If IRQ put bytes to rx_buffer, parse them */
 	    if (rx_flag) {
  80001f0:	4b0a      	ldr	r3, [pc, #40]	; (800021c <main+0x78>)
  80001f2:	781b      	ldrb	r3, [r3, #0]
@@ -214,7 +211,6 @@ int main(void)
  8000200:	f000 f88e 	bl	8000320 <command_parser_fsm>
 	    }
 
-	    /* Run communication FSM: handle !RST# and ACK/timeouts */
 	    uart_communication_fsm();
  8000204:	f000 f980 	bl	8000508 <uart_communication_fsm>
 	    HAL_GPIO_TogglePin(LED_RED_GPIO_Port, LED_RED_Pin);
@@ -257,7 +253,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
  8000242:	2300      	movs	r3, #0
  8000244:	82fb      	strh	r3, [r7, #22]
 
-    /* push byte if buffer not full */
     if (next_head != rx_tail) {
  8000246:	4b2e      	ldr	r3, [pc, #184]	; (8000300 <HAL_UART_RxCpltCallback+0xe0>)
  8000248:	881b      	ldrh	r3, [r3, #0]
@@ -279,15 +274,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
  8000264:	4a25      	ldr	r2, [pc, #148]	; (80002fc <HAL_UART_RxCpltCallback+0xdc>)
  8000266:	8afb      	ldrh	r3, [r7, #22]
  8000268:	8013      	strh	r3, [r2, #0]
-      rx_flag = 1; /* notify main loop there's data to process */
+      rx_flag = 1;
  800026a:	4b28      	ldr	r3, [pc, #160]	; (800030c <HAL_UART_RxCpltCallback+0xec>)
  800026c:	2201      	movs	r2, #1
  800026e:	701a      	strb	r2, [r3, #0]
     } else {
-      /* buffer full: drop byte (could set overflow flag) */
     }
 
-    /* ---------- ECHO handling so user sees what they type ---------- */
     if (rx_temp == '\r' || rx_temp == '\n') {
  8000270:	4b24      	ldr	r3, [pc, #144]	; (8000304 <HAL_UART_RxCpltCallback+0xe4>)
  8000272:	781b      	ldrb	r3, [r3, #0]
@@ -299,7 +292,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
  800027e:	b2db      	uxtb	r3, r3
  8000280:	2b0a      	cmp	r3, #10
  8000282:	d113      	bne.n	80002ac <HAL_UART_RxCpltCallback+0x8c>
-      /* If Enter pressed, echo CRLF */
       const char crlf[] = "\r\n";
  8000284:	4a22      	ldr	r2, [pc, #136]	; (8000310 <HAL_UART_RxCpltCallback+0xf0>)
  8000286:	f107 0310 	add.w	r3, r7, #16
@@ -315,7 +307,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
  800029c:	2202      	movs	r2, #2
  800029e:	481d      	ldr	r0, [pc, #116]	; (8000314 <HAL_UART_RxCpltCallback+0xf4>)
  80002a0:	f001 fffa 	bl	8002298 <HAL_UART_Transmit>
-      at_line_start = 1; /* cursor now at new line start */
+      at_line_start = 1;
  80002a4:	4b1c      	ldr	r3, [pc, #112]	; (8000318 <HAL_UART_RxCpltCallback+0xf8>)
  80002a6:	2201      	movs	r2, #1
  80002a8:	701a      	strb	r2, [r3, #0]
@@ -333,7 +325,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
  80002ba:	b2db      	uxtb	r3, r3
  80002bc:	2b7f      	cmp	r3, #127	; 0x7f
  80002be:	d109      	bne.n	80002d4 <HAL_UART_RxCpltCallback+0xb4>
-      /* Backspace: move cursor back, print space, move back again */
       const char bs_seq[] = "\b \b";
  80002c0:	4b16      	ldr	r3, [pc, #88]	; (800031c <HAL_UART_RxCpltCallback+0xfc>)
  80002c2:	60fb      	str	r3, [r7, #12]
@@ -345,9 +336,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
  80002ce:	f001 ffe3 	bl	8002298 <HAL_UART_Transmit>
     } else if (rx_temp == 0x08 || rx_temp == 127) {
  80002d2:	e008      	b.n	80002e6 <HAL_UART_RxCpltCallback+0xc6>
-      /* Optionally you could also remove last char from your local input buffer if maintained */
     } else {
-      /* Normal printable char: echo it back */
       HAL_UART_Transmit(&huart2, (uint8_t *)&rx_temp, 1, 10);
  80002d4:	230a      	movs	r3, #10
  80002d6:	2201      	movs	r2, #1
@@ -359,9 +348,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
  80002e2:	2200      	movs	r2, #0
  80002e4:	701a      	strb	r2, [r3, #0]
     }
-    /* ---------------------------------------------------------------- */
 
-    /* re-enable next byte reception */
     HAL_UART_Receive_IT(&huart2, (uint8_t *)&rx_temp, 1);
  80002e6:	2201      	movs	r2, #1
  80002e8:	4906      	ldr	r1, [pc, #24]	; (8000304 <HAL_UART_RxCpltCallback+0xe4>)
@@ -509,7 +496,6 @@ void command_parser_fsm(void)
  80003e8:	701a      	strb	r2, [r3, #0]
         }
 
-               /* DEBUG: báo parser đã nhận command (in chính nội dung cmd_buffer) */
         {
           char dbg[48];
           int n = snprintf(dbg, sizeof(dbg), "PARSER: got='%s'\r\n", cmd_buffer);
@@ -568,7 +554,6 @@ void command_parser_fsm(void)
 
 08000454 <transmit_last_packet>:
 
-/* Helper: send last_packet stored (non-blocking within reason) */
 static void transmit_last_packet(void)
 {
  8000454:	b580      	push	{r7, lr}
@@ -610,13 +595,11 @@ static void transmit_last_packet(void)
 
 08000498 <send_adc_packet>:
 
-/* Build and send packet from last_adc_value */
 static void send_adc_packet(void)
 {
  8000498:	b580      	push	{r7, lr}
  800049a:	b082      	sub	sp, #8
  800049c:	af00      	add	r7, sp, #0
-  /* format: !ADC=1234# (enough space: PACKET_MAXLEN >= 12) */
   int len = snprintf(last_packet, PACKET_MAXLEN, "!ADC=%lu#", (unsigned long)last_adc_value);
  800049e:	4b13      	ldr	r3, [pc, #76]	; (80004ec <send_adc_packet+0x54>)
  80004a0:	681b      	ldr	r3, [r3, #0]
@@ -670,10 +653,8 @@ static void send_adc_packet(void)
  8000504:	200000b8 	.word	0x200000b8
 
 08000508 <uart_communication_fsm>:
-     - !RST# : read ADC and send !ADC=xxxx#, then wait for !OK#
-     - !OK#  : acknowledge receipt (stop waiting/resend)
-   If ACK not received within ACK_TIMEOUT_MS, resend the packet (store last_packet).
-*/
+
+
 void uart_communication_fsm(void)
 {
  8000508:	b580      	push	{r7, lr}
@@ -685,7 +666,6 @@ void uart_communication_fsm(void)
  8000512:	b2db      	uxtb	r3, r3
  8000514:	2b00      	cmp	r3, #0
  8000516:	d027      	beq.n	8000568 <uart_communication_fsm+0x60>
-    /* copy command to local buffer to avoid races */
     char local_cmd[CMD_BUFFER_SIZE];
     strncpy(local_cmd, cmd_buffer, CMD_BUFFER_SIZE);
  8000518:	1d3b      	adds	r3, r7, #4
@@ -709,8 +689,7 @@ void uart_communication_fsm(void)
  800053a:	4603      	mov	r3, r0
  800053c:	2b00      	cmp	r3, #0
  800053e:	d108      	bne.n	8000552 <uart_communication_fsm+0x4a>
-      /* read latest ADC value (continuous conversion mode) */
-      /* Optionally check conversion ready with HAL_ADC_PollForConversion if desired */
+
       last_adc_value = HAL_ADC_GetValue(&hadc1);
  8000540:	4818      	ldr	r0, [pc, #96]	; (80005a4 <uart_communication_fsm+0x9c>)
  8000542:	f000 fc89 	bl	8000e58 <HAL_ADC_GetValue>
@@ -728,16 +707,14 @@ void uart_communication_fsm(void)
  800055c:	4603      	mov	r3, r0
  800055e:	2b00      	cmp	r3, #0
  8000560:	d102      	bne.n	8000568 <uart_communication_fsm+0x60>
-      /* ACK received: clear state */
       comm_state = COMM_IDLE;
  8000562:	4b13      	ldr	r3, [pc, #76]	; (80005b0 <uart_communication_fsm+0xa8>)
  8000564:	2200      	movs	r2, #0
  8000566:	701a      	strb	r2, [r3, #0]
-      /* Unknown command: optionally echo or ignore */
+    } else {
     }
   }
 
-  /* handle ACK timeout and resend */
   if (comm_state == COMM_SENT_WAIT_ACK) {
  8000568:	4b11      	ldr	r3, [pc, #68]	; (80005b0 <uart_communication_fsm+0xa8>)
  800056a:	781b      	ldrb	r3, [r3, #0]
@@ -754,10 +731,9 @@ void uart_communication_fsm(void)
  800057e:	f640 32b7 	movw	r2, #2999	; 0xbb7
  8000582:	4293      	cmp	r3, r2
  8000584:	d904      	bls.n	8000590 <uart_communication_fsm+0x88>
-      /* resend stored packet */
       transmit_last_packet();
  8000586:	f7ff ff65 	bl	8000454 <transmit_last_packet>
-      comm_timestamp = now; /* restart timer */
+      comm_timestamp = now;
  800058a:	4a0a      	ldr	r2, [pc, #40]	; (80005b4 <uart_communication_fsm+0xac>)
  800058c:	6a7b      	ldr	r3, [r7, #36]	; 0x24
  800058e:	6013      	str	r3, [r2, #0]

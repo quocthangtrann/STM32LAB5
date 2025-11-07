@@ -92,7 +92,6 @@ static void uart_send_crlf(void)
   HAL_UART_Transmit(&huart2, (uint8_t*)crlf, 2, 50);
 }
 
-/* Forward declarations of user functions */
 void command_parser_fsm(void);
 void uart_communication_fsm(void);
 /* USER CODE END 0 */
@@ -236,7 +235,6 @@ void command_parser_fsm(void)
   }
 }
 
-/* Helper: send last_packet stored (non-blocking within reason) */
 static void transmit_last_packet(void)
 {
   int len = (int)strlen(last_packet);
@@ -248,10 +246,8 @@ static void transmit_last_packet(void)
   }
 }
 
-/* Build and send packet from last_adc_value */
 static void send_adc_packet(void)
 {
-  /* format: !ADC=1234# (enough space: PACKET_MAXLEN >= 12) */
   int len = snprintf(last_packet, PACKET_MAXLEN, "!ADC=%lu#", (unsigned long)last_adc_value);
   if (len > 0 && len < PACKET_MAXLEN) {
     HAL_UART_Transmit(&huart2, (uint8_t *)last_packet, len, 200);
@@ -262,41 +258,30 @@ static void send_adc_packet(void)
   }
 }
 
-/* ------------------ UART Communication FSM ------------------
-   Handles commands:
-     - !RST# : read ADC and send !ADC=xxxx#, then wait for !OK#
-     - !OK#  : acknowledge receipt (stop waiting/resend)
-   If ACK not received within ACK_TIMEOUT_MS, resend the packet (store last_packet).
-*/
+
 void uart_communication_fsm(void)
 {
   if (command_available) {
-    /* copy command to local buffer to avoid races */
     char local_cmd[CMD_BUFFER_SIZE];
     strncpy(local_cmd, cmd_buffer, CMD_BUFFER_SIZE);
     local_cmd[CMD_BUFFER_SIZE - 1] = '\0';
     command_available = 0;
 
     if (strcmp(local_cmd, "!RST#") == 0) {
-      /* read latest ADC value (continuous conversion mode) */
-      /* Optionally check conversion ready with HAL_ADC_PollForConversion if desired */
+
       last_adc_value = HAL_ADC_GetValue(&hadc1);
       send_adc_packet();
     } else if (strcmp(local_cmd, "!OK#") == 0) {
-      /* ACK received: clear state */
       comm_state = COMM_IDLE;
     } else {
-      /* Unknown command: optionally echo or ignore */
     }
   }
 
-  /* handle ACK timeout and resend */
   if (comm_state == COMM_SENT_WAIT_ACK) {
     uint32_t now = HAL_GetTick();
     if ((now - comm_timestamp) >= ACK_TIMEOUT_MS) {
-      /* resend stored packet */
       transmit_last_packet();
-      comm_timestamp = now; /* restart timer */
+      comm_timestamp = now;
     }
   }
 }
