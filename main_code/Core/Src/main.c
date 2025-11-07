@@ -46,14 +46,12 @@ ADC_HandleTypeDef hadc1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-/* UART RX single-byte temp (for HAL receive IRQ) */
 volatile uint8_t rx_temp = 0;
 
-/* Circular RX buffer (producer in IRQ, consumer in main) */
 volatile uint8_t rx_buffer[RX_BUFFER_SIZE];
 volatile uint16_t rx_head = 0;
 volatile uint16_t rx_tail = 0;
-volatile uint8_t rx_flag = 0; /* set by IRQ when new data arrived */
+volatile uint8_t rx_flag = 0;
 volatile uint8_t at_line_start = 1;
 
 
@@ -73,7 +71,7 @@ typedef enum {
 } comm_state_t;
 
 comm_state_t comm_state = COMM_IDLE;
-uint32_t comm_timestamp = 0; /* ms when last packet was sent */
+uint32_t comm_timestamp = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -130,12 +128,10 @@ int main(void)
   MX_ADC1_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  /* Start ADC in continuous mode (configured in MX) */
    if (HAL_ADC_Start(&hadc1) != HAL_OK) {
      Error_Handler();
    }
 
-   /* Start UART receive: 1 byte by interrupt */
    if (HAL_UART_Receive_IT(&huart2, (uint8_t *)&rx_temp, 1) != HAL_OK) {
      Error_Handler();
    }
@@ -150,13 +146,11 @@ int main(void)
 	    HAL_GPIO_TogglePin(LED_RED_GPIO_Port, LED_RED_Pin);
 	    HAL_Delay(500);
 
-	    /* If IRQ put bytes to rx_buffer, parse them */
 	    if (rx_flag) {
 	      rx_flag = 0;
 	      command_parser_fsm();
 	    }
 
-	    /* Run communication FSM: handle !RST# and ACK/timeouts */
 	    uart_communication_fsm();
     /* USER CODE BEGIN 3 */
   }
@@ -175,35 +169,26 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     uint16_t next_head = rx_head + 1;
     if (next_head >= RX_BUFFER_SIZE) next_head = 0;
 
-    /* push byte if buffer not full */
     if (next_head != rx_tail) {
       rx_buffer[rx_head] = rx_temp;
       rx_head = next_head;
-      rx_flag = 1; /* notify main loop there's data to process */
+      rx_flag = 1;
     } else {
-      /* buffer full: drop byte (could set overflow flag) */
     }
 
-    /* ---------- ECHO handling so user sees what they type ---------- */
     if (rx_temp == '\r' || rx_temp == '\n') {
-      /* If Enter pressed, echo CRLF */
       const char crlf[] = "\r\n";
       HAL_UART_Transmit(&huart2, (uint8_t*)crlf, 2, 10);
-      at_line_start = 1; /* cursor now at new line start */
+      at_line_start = 1;
 
     } else if (rx_temp == 0x08 || rx_temp == 127) {
-      /* Backspace: move cursor back, print space, move back again */
       const char bs_seq[] = "\b \b";
       HAL_UART_Transmit(&huart2, (uint8_t*)bs_seq, 3, 10);
-      /* Optionally you could also remove last char from your local input buffer if maintained */
     } else {
-      /* Normal printable char: echo it back */
       HAL_UART_Transmit(&huart2, (uint8_t *)&rx_temp, 1, 10);
       at_line_start = 0;
     }
-    /* ---------------------------------------------------------------- */
 
-    /* re-enable next byte reception */
     HAL_UART_Receive_IT(&huart2, (uint8_t *)&rx_temp, 1);
   }
 }
@@ -231,7 +216,17 @@ void command_parser_fsm(void)
       if (b == '#') {
         cmd_buffer[cmd_len] = '\0';
 
+        {
+          const char crlf[] = "\r\n";
+          HAL_UART_Transmit(&huart2, (uint8_t*)crlf, 2, 50);
+          at_line_start = 1;
+        }
 
+        {
+          char dbg[48];
+          int n = snprintf(dbg, sizeof(dbg), "PARSER: got='%s'\r\n", cmd_buffer);
+          HAL_UART_Transmit(&huart2, (uint8_t*)dbg, n, 100);
+        }
 
         command_available = 1;
         cmd_len = 0;
