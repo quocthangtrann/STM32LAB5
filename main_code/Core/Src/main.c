@@ -54,6 +54,8 @@ volatile uint8_t rx_buffer[RX_BUFFER_SIZE];
 volatile uint16_t rx_head = 0;
 volatile uint16_t rx_tail = 0;
 volatile uint8_t rx_flag = 0; /* set by IRQ when new data arrived */
+volatile uint8_t at_line_start = 1;
+
 
 /* Command parser */
 char cmd_buffer[CMD_BUFFER_SIZE];
@@ -182,6 +184,25 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
       /* buffer full: drop byte (could set overflow flag) */
     }
 
+    /* ---------- ECHO handling so user sees what they type ---------- */
+    if (rx_temp == '\r' || rx_temp == '\n') {
+      /* If Enter pressed, echo CRLF */
+      const char crlf[] = "\r\n";
+      HAL_UART_Transmit(&huart2, (uint8_t*)crlf, 2, 10);
+      at_line_start = 1; /* cursor now at new line start */
+
+    } else if (rx_temp == 0x08 || rx_temp == 127) {
+      /* Backspace: move cursor back, print space, move back again */
+      const char bs_seq[] = "\b \b";
+      HAL_UART_Transmit(&huart2, (uint8_t*)bs_seq, 3, 10);
+      /* Optionally you could also remove last char from your local input buffer if maintained */
+    } else {
+      /* Normal printable char: echo it back */
+      HAL_UART_Transmit(&huart2, (uint8_t *)&rx_temp, 1, 10);
+      at_line_start = 0;
+    }
+    /* ---------------------------------------------------------------- */
+
     /* re-enable next byte reception */
     HAL_UART_Receive_IT(&huart2, (uint8_t *)&rx_temp, 1);
   }
@@ -196,31 +217,26 @@ void command_parser_fsm(void)
     if (rx_tail >= RX_BUFFER_SIZE) rx_tail = 0;
 
     if (b == '!') {
-      /* start new command */
       cmd_len = 0;
       if (cmd_len < (CMD_BUFFER_SIZE - 1)) {
         cmd_buffer[cmd_len++] = '!';
       }
     } else if (cmd_len > 0) {
-      /* we are inside a command */
       if (cmd_len < (CMD_BUFFER_SIZE - 1)) {
         cmd_buffer[cmd_len++] = (char)b;
       } else {
-        /* overflow: reset parser */
         cmd_len = 0;
       }
 
       if (b == '#') {
-        /* complete command */
         cmd_buffer[cmd_len] = '\0';
+
+
+
         command_available = 1;
-        /* reset cmd_len so next command starts fresh */
         cmd_len = 0;
-        /* return to let main handle (optional: continue to parse more commands) */
-        /* continue parsing remaining bytes in buffer */
       }
     } else {
-      /* ignore bytes outside !...# frame */
     }
   }
 }
@@ -232,6 +248,8 @@ static void transmit_last_packet(void)
   if (len > 0) {
     HAL_UART_Transmit(&huart2, (uint8_t *)last_packet, len, 200);
     uart_send_crlf();
+    at_line_start = 1; /* now we are at start of next line */
+
   }
 }
 
@@ -243,6 +261,7 @@ static void send_adc_packet(void)
   if (len > 0 && len < PACKET_MAXLEN) {
     HAL_UART_Transmit(&huart2, (uint8_t *)last_packet, len, 200);
     uart_send_crlf();
+    at_line_start = 1;
     comm_state = COMM_SENT_WAIT_ACK;
     comm_timestamp = HAL_GetTick();
   }
